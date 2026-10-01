@@ -244,23 +244,56 @@ class TextGenerator(Protocol):
 
 class OpenAIGenerator:
     def __init__(self, max_output_tokens: int = 300) -> None:
-        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+        openai_key = os.getenv("OPENAI_API_KEY", "").strip()
         self.model = os.getenv("OPENAI_MODEL", "").strip()
-        if not api_key:
-            raise RuntimeError("OPENAI_API_KEY is missing from .env")
-        if not self.model:
-            raise RuntimeError("OPENAI_MODEL is missing from .env")
-        self.client = OpenAI(api_key=api_key)
+
+        if openrouter_key:
+            base_url = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1").strip()
+            self.client = OpenAI(api_key=openrouter_key, base_url=base_url)
+            self.is_openrouter = True
+            if not self.model:
+                self.model = "openai/gpt-4o-mini"
+            elif "/" not in self.model:
+                self.model = f"openai/{self.model}"
+        elif openai_key and openai_key != "your_openai_api_key_here":
+            base_url = os.getenv("OPENAI_BASE_URL", "").strip() or None
+            self.client = OpenAI(api_key=openai_key, base_url=base_url)
+            self.is_openrouter = False
+            if not self.model:
+                self.model = "gpt-4o-mini"
+        else:
+            raise RuntimeError("OPENROUTER_API_KEY or OPENAI_API_KEY is missing from .env")
+
         self.max_output_tokens = max_output_tokens
 
     def generate(self, prompt: str) -> str:
-        response = self.client.responses.create(
-            model=self.model,
-            input=prompt,
-            temperature=0,
-            max_output_tokens=self.max_output_tokens,
-        )
-        answer = response.output_text.strip()
+        if getattr(self, "is_openrouter", False):
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                max_tokens=self.max_output_tokens,
+            )
+            answer = (response.choices[0].message.content or "").strip()
+        else:
+            try:
+                response = self.client.responses.create(
+                    model=self.model,
+                    input=prompt,
+                    temperature=0,
+                    max_output_tokens=self.max_output_tokens,
+                )
+                answer = response.output_text.strip()
+            except Exception:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0,
+                    max_tokens=self.max_output_tokens,
+                )
+                answer = (response.choices[0].message.content or "").strip()
+
         if not answer:
             raise RuntimeError("OpenAI returned an empty answer")
         return answer
