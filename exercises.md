@@ -30,11 +30,11 @@ critical.
 
 | Metric | Acceptable Low Score Scenario | Critical Low Score Scenario | Action Required |
 |---|---|---|---|
-| Faithfulness | | | |
-| Answer Relevance | | | |
-| Context Recall | | | |
-| Context Precision | | | |
-| Completeness | | | |
+| Faithfulness | Câu hỏi out-of-domain hoặc model từ chối trả lời ("Tôi không tìm thấy thông tin"), không bịa context. | Model hallucinate, bịa sai chính sách đổi trả hoặc thông số kỹ thuật sản phẩm gây thiệt hại. | Giảm temperature, bổ sung prompt constraint yêu cầu strictly grounded vào context. |
+| Answer Relevance | Khi context thiếu thông tin, câu trả lời từ chối lịch sự và hỏi lại để làm rõ nhu cầu. | Trả lời lạc đề hoàn toàn, sao chép context không liên quan đến thắc mắc của user. | Cải thiện query parsing/expansion, bổ sung few-shot prompt hướng dẫn trả lời trọng tâm. |
+| Context Recall | Câu hỏi mở/đơn giản chỉ cần một phần thông tin cốt lõi là đủ để trả lời đúng. | Bỏ sót hoàn toàn chunk chứa thông tin quyết định khiến answer sai hoặc thiếu nghiêm trọng. | Tăng top-k retrieval, tối ưu hóa chunk size và chiến lược chunking tài liệu. |
+| Context Precision | Đang thiết lập top-k lớn (ví dụ k=10) phục vụ bước re-ranking tiếp theo. | Chunk liên quan bị đẩy xuống cuối hoặc đứng sau nhiều chunk gây nhiễu, làm giảm chất lượng sinh. | Thêm module Reranker (Cross-encoder), lọc similarity threshold, kết hợp Hybrid Search. |
+| Completeness | Khách hàng chỉ yêu cầu xác nhận nhanh Yes/No hoặc thông tin ngắn gọn. | Bỏ sót các điều kiện ràng buộc quan trọng (hạn bảo hành, chi phí phát sinh, điều kiện áp dụng). | Bổ sung hướng dẫn tổng hợp đa khía cạnh (aspect-based) vào prompt sinh câu trả lời. |
 
 ### Exercise 1.2 — Bias trong LLM-as-a-Judge
 
@@ -46,15 +46,18 @@ Ba bias thường gặp:
 
 **Câu 1: Thiết kế experiment phát hiện position bias với ít nhất hai conditions.**
 
-> *Câu trả lời:*
+
+> Condition 1 (Forward order): Sinh ra 2 câu trả lời A và B, gửi kèm vào prompt, ghi nhận chuỗi quyết định của judge.
+  Condition 2: Đổi ngược thứ tự thành B và A với cùng nội dung và prompt đánh giá.
+ Nếu judge đổi phán quyết khi thay đổi vị trí các câu trả lời, position bias xuất hiện. Khắc phục bằng cách đánh giá cả 2 chiều và chỉ công nhận thắng khi nhất quán, hoặc tính trung bình điểm cả 2 lần.
 
 **Câu 2: Làm thế nào giảm verbosity bias bằng rubric design?**
 
-> *Câu trả lời:*
+> Thiết kế rubric theo dạng atomic fact checklist: Chấm điểm dựa trên số lượng thông tin đúng và đầy đủ theo tiêu chuẩn thay vì cảm nhận độ trôi chảy. Thêm tiêu chí ngắn gọn và phạt trực tiếp các câu dài dòng mang tính lặp lại hoặc thêm thông tin không cần thiết. Định nghĩa rõ ràng thang điểm mẫu chỉ ra câu trả lời ngắn nhưng đủ ý vẫn đạt điểm tuyệt đối.
 
 **Câu 3: Tại sao cần calibrate LLM judge với human labels?**
 
-> *Câu trả lời:*
+> LLM judge có thể mang bias cố hữu, lệch chuẩn định lượng làm chấm quá khắt khe hoặc quá dễ dãi hoặc không hiểu đúng ngữ cảnh nghiệp vụ. Cần đo độ tương quan giữa điểm của LLM judge với nhãn chuyên gia. Từ đó hiệu chỉnh rubric, few-shot examples và ngưỡng điểm để đảm bảo judge phản ánh đúng đánh giá của con người trước khi tự động hóa hoàn toàn.
 
 ### Exercise 1.3 — Evaluation trong CI/CD
 
@@ -62,13 +65,15 @@ Ba bias thường gặp:
 
 | Metric | Threshold | Lý do |
 |---|---:|---|
-| Faithfulness | | |
-| Answer Relevance | | |
-| Completeness | | |
+| Faithfulness | 0.85 | Ngăn ngừa tối đa hallucination; đảm bảo thông tin sản phẩm và chính sách chính xác, tránh rủi ro pháp lý/uy tín. |
+| Answer Relevance | 0.80 | Đảm bảo câu trả lời trực diện, giải quyết đúng vấn đề của khách hàng, hạn chế dài dòng lạc đề. |
+| Completeness | 0.75 | Đảm bảo bao quát đủ các thông tin cốt lõi, chấp nhận mức độ tóm tắt vừa phải để phản hồi nhanh. |
 
 **Câu 2: Khi nào dùng offline evaluation, online evaluation và human review?**
 
-> *Câu trả lời:*
+> Offline evaluation: Chạy tự động trong CI/CD pipeline trên Golden Dataset trước khi deploy để phát hiện sớm regression nhanh và tiết kiệm chi phí.
+Online evaluation: Chạy giám sát thời gian thực trên production traffic thông qua implicit feedback (thumbs up/down, CTR, tỷ lệ chuyển sang nhân viên) và sampling LLM-as-a-judge để phát hiện data drift hoặc lỗi phát sinh trong môi trường thực.
+Human review: Tiến hành định kỳ hoặc trên các ca điểm thấp, ca tranh chấp, escalation phức tạp nhằm kiểm định lại LLM judge và liên tục cập nhật thêm test cases vào Golden Dataset.
 
 ---
 
