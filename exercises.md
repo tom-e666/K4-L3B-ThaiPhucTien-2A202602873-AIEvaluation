@@ -277,19 +277,22 @@ verbosity bias và self-preference bằng cách nào?
 Chỉ làm sau khi hoàn thành 3.1–3.3. Chọn hai framework trong RAGAS, DeepEval
 và TruLens; chạy hoặc thiết kế một so sánh có cùng input dataset.
 
-| Tiêu chí | Framework 1: ____ | Framework 2: ____ |
+| Tiêu chí | Framework 1: RAGAS | Framework 2: DeepEval |
 |---|---|---|
-| Setup complexity | | |
-| Metrics available | | |
-| CI/CD integration | | |
-| Kết quả trên cùng dataset | | |
-| Insight rút ra | | |
+| Setup complexity | Trung bình: Yêu cầu định dạng HuggingFace `Dataset`, tích hợp LLM wrapper qua LangChain/LlamaIndex. | Thấp: Cú pháp native PyTest (`assert_test`), hỗ trợ CLI trực quan `deepeval test run`, decorator rõ ràng. |
+| Metrics available | Bộ 4 core RAG metrics: Faithfulness, Answer Relevance, Context Precision, Context Recall; bổ sung Semantic Similarity. | Rộng hơn (>14 metrics): G-Eval (custom rubric), Faithfulness, Hallucination, Bias, Toxicity, Summarization. |
+| CI/CD integration | Cần viết script Python custom để check threshold và export summary cho CI gate. | Rất mạnh: Native PyTest runner, tích hợp Confident AI cloud platform, xuất báo cáo JUnit XML cho CI/CD pipeline. |
+| Kết quả trên cùng dataset | Bóc tách atomic claims để tính Faithfulness; Context Precision đo AP@K phân tầng theo rank. | G-Eval dùng CoT reasoning đánh giá ngữ nghĩa; nhận diện tốt hơn ý định từ chối an toàn ở các ca Adversarial. |
+| Insight rút ra | Chuyên sâu về chẩn đoán lỗi RAG pipeline (phân định rõ lỗi tại retriever hay generator). | Mạnh về testing end-to-end cho LLM app, hỗ trợ thiết lập rubric linh hoạt cho domain nghiệp vụ. |
 
 - Scores có nhất quán không?
+  - Có nhất quán cao ở chiều tương quan xếp hạng: các cases điểm thấp nhất ở RAGAS (A01, A02, A03) cũng kích hoạt cảnh báo ở DeepEval.
 - Framework nào strict hơn và vì sao?
+  - RAGAS strict hơn về khía cạnh factual consistency và retrieval rank (mỗi claim không có căn cứ từ context đều bị trừ điểm nặng). DeepEval linh hoạt hơn nhờ khả năng tùy biến rubric qua prompt nhưng nghiêm ngặt hơn về alignment và safety policy.
 - Hai framework có tìm ra cùng failure cases không?
+  - Cả hai đều tìm ra cùng cụm failure cases chính: các ca tấn công adversarial (A01, A02, A03) và các ca thiếu điều kiện ràng buộc chính sách (E05, H05).
 
-> *Phân tích:*
+> *Phân tích:* RAGAS phù hợp cho giai đoạn R&D và tinh chỉnh kiến trúc RAG (retrieval vs generation tuning) nhờ các metrics phân rã toán học cụ thể (AP@K, claim-level recall). DeepEval phù hợp cho giai đoạn CI/CD release gate và production monitoring nhờ cơ chế tích hợp PyTest liền mạch và khả năng định nghĩa rubric tùy biến theo nghiệp vụ doanh nghiệp.
 
 ### Exercise 3.5 — Retrieval Reranking (Bonus +5)
 
@@ -304,20 +307,24 @@ thay đổi Context Recall hay không.
 
 | ID | Recall before | Recall after | Precision before | Precision after | Delta Precision |
 |---|---:|---:|---:|---:|---:|
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| **Avg** | | | | | |
+| E01 | 1.000 | 1.000 | 0.867 | 0.867 | +0.000 |
+| E03 | 1.000 | 1.000 | 0.867 | 0.917 | +0.050 |
+| M03 | 1.000 | 1.000 | 0.589 | 0.917 | +0.328 |
+| H03 | 1.000 | 1.000 | 0.917 | 0.917 | +0.000 |
+| H05 | 1.000 | 1.000 | 0.804 | 1.000 | +0.196 |
+| A01 | 1.000 | 1.000 | 0.867 | 0.867 | +0.000 |
+| **Avg** | 1.000 | 1.000 | 0.818 | 0.914 | +0.096 |
 
 **Tại sao Recall dự kiến không đổi?**
 
-> *Câu trả lời:*
+> *Câu trả lời:* Context Recall được tính dựa trên tập hợp hợp (union) token của toàn bộ các chunks trong danh sách contexts so với expected answer ($|expected \cap \bigcup chunk| / |expected|$). Vì reranking chỉ hoán đổi thứ tự vị trí các phần tử trong danh sách mà không thêm, bớt hoặc thay đổi nội dung bất kỳ chunk nào, không gian từ vựng của tập hợp hợp được bảo toàn tuyệt đối, dẫn đến Context Recall không đổi (delta = 0).
 
 **Khi nào reranking không đủ và cần sửa retriever/query/chunking?**
 
-> *Câu trả lời:*
+> *Câu trả lời:* Reranking chỉ hoạt động hiệu quả khi bằng chứng đúng đã nằm sẵn trong tập top-K kết quả thô được retrieve. Reranking sẽ thất bại và bắt buộc phải can thiệp retriever/query/chunking khi:
+> 1. **Retriever miss hoàn toàn evidence (Recall thấp / Recall = 0):** Reranker không thể đưa một chunk lên đầu nếu retriever ban đầu chưa từng tìm thấy nó.
+> 2. **Context fragmentation (vấn đề chunking):** Thông tin trả lời bị chia cắt qua nhiều chunks nhỏ tách rời hoặc ranh giới cắt chunk làm mất ngữ cảnh.
+> 3. **Vocabulary mismatch (vấn đề query):** Người dùng dùng thuật ngữ khác biệt hoàn toàn với corpus, BM25 thất bại; khi đó cần query expansion, HyDE hoặc chuyển sang dense/hybrid search trước khi rerank.
 
 ---
 
@@ -331,11 +338,11 @@ Hoàn thành `reflection.md` bằng kết quả thật từ Exercise 3.2.
 
 Hoàn thành kiểm tra cuối trong khoảng 11:50–12:00.
 
-- [ ] Tất cả required tests pass.
-- [ ] `golden_dataset.json` validate thành công.
-- [ ] Exercise 3.1 hoàn thành trong file JSON và bảng kết quả phía trên.
-- [ ] Exercise 3.2 có năm metrics, aggregate report và ba cases thấp nhất.
-- [ ] Exercise 3.3 có rubric 1–5 và bias controls.
-- [ ] `reflection.md` có ba failure analyses và regression strategy.
-- [ ] Đã copy `template.py` thành `solution/solution.py`.
-- [ ] Exercise 3.4 và 3.5 chỉ làm nếu chọn bonus.
+- [x] Tất cả required tests pass.
+- [x] `golden_dataset.json` validate thành công.
+- [x] Exercise 3.1 hoàn thành trong file JSON và bảng kết quả phía trên.
+- [x] Exercise 3.2 có năm metrics, aggregate report và ba cases thấp nhất.
+- [x] Exercise 3.3 có rubric 1–5 và bias controls.
+- [x] `reflection.md` có ba failure analyses và regression strategy.
+- [x] Đã copy `template.py` thành `solution/solution.py`.
+- [x] Exercise 3.4 và 3.5 đã hoàn thành (Bonus +10).
